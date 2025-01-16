@@ -413,6 +413,8 @@ void cyw43_cb_process_async_event(void *cb_data, const cyw43_async_event_t *ev) 
             // PSK_SUP failure
             self->wifi_join_state = WIFI_JOIN_STATE_BADAUTH;
         }
+    } else {
+        CYW43_VDEBUG("Unhandled async event %lu\n", ev->event_type);
     }
 
     if (self->wifi_join_state == WIFI_JOIN_STATE_ALL) {

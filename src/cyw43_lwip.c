@@ -51,6 +51,14 @@
 #if CYW43_LWIP
 
 #if CYW43_NETUTILS
+static void cyw43_format_mac(char *buf, const uint8_t *mac) {
+    sprintf(buf, "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+static void cyw43_format_ip(char *buf, const uint8_t *ip) {
+    sprintf(buf, "%03d.%03d.%03d.%03d", ip[0], ip[1], ip[2], ip[3]);
+}
+
 static void cyw43_ethernet_trace(cyw43_t *self, struct netif *netif, size_t len, const void *data, unsigned int flags) {
     bool is_tx = flags & NETUTILS_TRACE_IS_TX;
     if ((is_tx && (self->trace_flags & CYW43_TRACE_ETH_TX))
@@ -68,11 +76,41 @@ static void cyw43_ethernet_trace(cyw43_t *self, struct netif *netif, size_t len,
 
         if (self->trace_flags & CYW43_TRACE_MAC) {
             CYW43_PRINTF("[% 8d] ETH%cX itf=%c%c len=%u", (int)cyw43_hal_ticks_ms(), is_tx ? 'T' : 'R', netif->name[0], netif->name[1], len);
-            CYW43_PRINTF(" MAC type=%d subtype=%d data=", buf[0] >> 2 & 3, buf[0] >> 4);
-            for (size_t i = 0; i < len; ++i) {
-                CYW43_PRINTF(" %02x", buf[i]);
-            }
-            CYW43_PRINTF("\n");
+            char mac_dst[18];
+            cyw43_format_mac(mac_dst, &buf[0]);
+            char mac_src[18];
+            cyw43_format_mac(mac_src, &buf[6]);
+            uint32_t subtype = buf[12] << 8 | buf[13];
+            CYW43_PRINTF(" src=%s dst=%s subtype=%04lx\n", mac_src, mac_dst, subtype);
+            if (subtype == 0x0800) {
+                // IPv4
+                uint32_t tlen = (buf[16] << 8) | buf[17];
+                uint32_t id = (buf[18] << 8) | buf[19];
+                uint32_t ip_flags = buf[20] >> 5;
+                uint32_t frag_offset = ((buf[20] & 0x1F) << 8) | buf[21];
+                uint32_t protocol = buf[23];
+                char ip_src[16];
+                cyw43_format_ip(ip_src, &buf[26]);
+                char ip_dst[16];
+                cyw43_format_ip(ip_dst, &buf[30]);
+                CYW43_PRINTF("    IPv4 tlen=%lu id=%lu flags=%lx frag_offset=%lu protocol=%lu src=%s dst=%s\n", tlen, id, ip_flags, frag_offset, protocol, ip_src, ip_dst);
+                if (protocol == 17) {
+                    // UDP
+                    uint32_t udp_src = (buf[34] << 8) | buf[35];
+                    uint32_t udp_dst = (buf[36] << 8) | buf[37];
+                    uint32_t udp_len = (buf[38] << 8) | buf[39];
+                    CYW43_PRINTF("    UDP src=%lu dst=%lu len=%lu\n", udp_src, udp_dst, udp_len);
+                } else if (protocol == 6) {
+                    // TCP
+                    uint32_t tcp_src = (buf[34] << 8) | buf[35];
+                    uint32_t tcp_dst = (buf[36] << 8) | buf[37];
+                    uint32_t tcp_seq = (buf[38] << 24) | (buf[39] << 16) | (buf[40] << 8) | buf[41];
+                    uint32_t tcp_ack = (buf[42] << 24) | (buf[43] << 16) | (buf[44] << 8) | buf[45];
+                    uint32_t tcp_flags = buf[46] << 8 | buf[47];
+                    CYW43_PRINTF("    TCP src=%lu dst=%lu seq=%08lx ack=%08lx flags=%02lx\n", tcp_src, tcp_dst, tcp_seq, tcp_ack, tcp_flags);
+                }
+            } 
+            CYW43_HEXDUMP("    ", buf, len);
             return;
         }
 
